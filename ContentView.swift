@@ -7,6 +7,12 @@ struct CurrencyResponsee: Codable {
     let conversion_rate: Double
 }
 
+extension Array {
+    /// Безопасный доступ к массиву: возвращает элемент, если индекс находится в допустимых пределах
+    subscript(safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
 // Модель для получения исторических данных (переименована, если конфликтует)
 struct CurrencyRate {
     var date: String
@@ -199,69 +205,77 @@ struct ContentView: View {
 
     // Функция для получения обменного курса по году, валюте и дате
     func getExchangeRateFromXLSX(year: String, currency: String, date: String) -> Double? {
-        do {
-            // Загружаем файл XLSX, разворачиваем опционал
-            guard let file = try? XLSXFile(filepath: fileURL.path) else {
-                print("Ошибка при загрузке файла XLSX.")
-                return nil
+        // Проверяем наличие файла в Bundle
+        guard let fileURL = Bundle.main.url(forResource: "dailyrus", withExtension: "xlsx") else {
+            print("Ошибка: файл 'dailyrus.xlsx' не найден в Bundle.")
+            return nil
+        }
+
+        // Загружаем файл XLSX
+        guard let file = XLSXFile(filepath: fileURL.path) else {
+            print("Ошибка: не удалось загрузить файл XLSX.")
+            return nil
+        }
+
+        // Получаем общие строки
+        guard let sharedStrings = try? file.parseSharedStrings() else {
+            print("Ошибка: невозможно получить общие строки.")
+            return nil
+        }
+
+        // Получаем пути к листам
+        guard let sheets = try? file.parseWorksheetPaths(), !sheets.isEmpty else {
+            print("Ошибка: невозможно получить пути к листам. Листы отсутствуют.")
+            return nil
+        }
+
+        // Проходим по всем листам
+        for sheetPath in sheets {
+            // Парсим текущий лист
+            guard let worksheet = try? file.parseWorksheet(at: sheetPath) else {
+                print("Ошибка: невозможно прочитать лист '\(sheetPath)'.")
+                continue
             }
-            
-            // Читаем общие строки из файла
-            guard let sharedStrings = try? file.parseSharedStrings() else {
-                print("Ошибка при чтении общих строк.")
-                return nil
-            }
-            
-            // Получаем список всех листов в файле
-            let sheets = try file.parseWorksheetPaths()
-            
-            // Перебираем все листы
-            for sheetPath in sheets {
-                let worksheet = try file.parseWorksheet(at: sheetPath)
-                
-                // Используем URL для получения имени листа
-                let sheetURL = URL(fileURLWithPath: sheetPath)
-                let sheetName = sheetURL.lastPathComponent  // Извлекаем имя листа
-                
-                // Проверяем, совпадает ли название листа с нужным годом
-                if sheetName.contains(year) {
-                    
-                    // Перебираем все строки на листе
-                    for row in worksheet.data?.rows ?? [] {
-                        // Пытаемся извлечь значения из каждой строки
-                        if let dateCell = row.cells.first?.stringValue(sharedStrings), // Получаем дату из первой ячейки
-                           let usdCell = row.cells[1].stringValue(sharedStrings), // USD во второй ячейке
-                           let eurCell = row.cells[2].stringValue(sharedStrings), // EUR в третьей
-                           let rubCell = row.cells[3].stringValue(sharedStrings), // RUB в четвертой
-                           let kztCell = row.cells[4].stringValue(sharedStrings), // KZT в пятой
-                           let cnyCell = row.cells[5].stringValue(sharedStrings) { // CNY в шестой
-                           
-                            // Проверяем, совпадает ли дата с искомой
-                            if dateCell.contains(date) {
-                                // Если дата совпала, возвращаем курс нужной валюты
-                                if currency == "USD" {
-                                    return Double(usdCell)
-                                } else if currency == "EUR" {
-                                    return Double(eurCell)
-                                } else if currency == "RUB" {
-                                    return Double(rubCell)
-                                } else if currency == "KZT" {
-                                    return Double(kztCell)
-                                } else if currency == "CNY" {
-                                    return Double(cnyCell)
-                                }
-                            }
+
+            // Перебираем строки в листе
+            for row in worksheet.data?.rows ?? [] {
+                // Проверяем дату в первой ячейке строки
+                if let dateCell = row.cells.first?.stringValue(sharedStrings),
+                   dateCell == date {
+                    // Ищем значение валюты по индексу
+                    switch currency {
+                    case "USD":
+                        if let cell = row.cells[safe: 1], let value = cell.stringValue(sharedStrings) {
+                            return Double(value)
                         }
+                    case "EUR":
+                        if let cell = row.cells[safe: 2], let value = cell.stringValue(sharedStrings) {
+                            return Double(value)
+                        }
+                    case "RUB":
+                        if let cell = row.cells[safe: 3], let value = cell.stringValue(sharedStrings) {
+                            return Double(value)
+                        }
+                    case "KZT":
+                        if let cell = row.cells[safe: 4], let value = cell.stringValue(sharedStrings) {
+                            return Double(value)
+                        }
+                    case "CNY":
+                        if let cell = row.cells[safe: 5], let value = cell.stringValue(sharedStrings) {
+                            return Double(value)
+                        }
+                    default:
+                        return nil
                     }
                 }
             }
-        } catch {
-            print("Ошибка при обработке файла XLSX: \(error)")
-            return nil
         }
-        
+
+        // Возвращаем nil, если ничего не найдено
+        print("Данные не найдены: \(currency), \(date).")
         return nil
     }
+
 
     // Функция для получения деталей валюты (название и страна)
     func getCurrencyDetails(for currencyCode: String) -> (name: String, country: String) {
