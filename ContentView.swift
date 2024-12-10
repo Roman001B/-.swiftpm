@@ -200,17 +200,29 @@ struct ContentView: View {
                                           ("ZWL", "Zimbabwean Dollar", "Zimbabwe")
     ]
     
-    // Путь к файлу dailyrus.xlsx
-    let fileURL = Bundle.main.url(forResource: "dailyrus", withExtension: "xlsx")!
+    // Преобразование числовой даты из Excel в формат DD.MM.YY
+    func convertExcelDateToString(_ excelDate: String) -> String? {
+        guard let excelDateNumber = Double(excelDate) else {
+            print("Ошибка: неверный формат числовой даты \(excelDate).")
+            return nil
+        }
 
-    // Функция для получения обменного курса по году, валюте и дате
+        // Excel считает дни начиная с 1900 года (с учетом смещения)
+        let referenceDate = Date(timeIntervalSince1970: (excelDateNumber - 25569) * 86400)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd.MM.yy" // Устанавливаем нужный формат даты
+        return formatter.string(from: referenceDate)
+    }
+
+    // Путь к файлу dailyrus.xlsx
     func getExchangeRateFromXLSX(year: String, currency: String, date: String) -> Double? {
         // Проверяем наличие файла в Bundle
         guard let fileURL = Bundle.main.url(forResource: "dailyrus", withExtension: "xlsx") else {
             print("Ошибка: файл 'dailyrus.xlsx' не найден в Bundle.")
             return nil
         }
-
+        print("Путь к файлу XLSX: \(fileURL.path)")
+        
         // Загружаем файл XLSX
         guard let file = XLSXFile(filepath: fileURL.path) else {
             print("Ошибка: не удалось загрузить файл XLSX.")
@@ -228,10 +240,11 @@ struct ContentView: View {
             print("Ошибка: невозможно получить пути к листам. Листы отсутствуют.")
             return nil
         }
-
+        print("Найденные листы: \(sheets)")
+        
         // Проходим по всем листам
         for sheetPath in sheets {
-            // Парсим текущий лист
+            print("Обрабатывается лист: \(sheetPath)")
             guard let worksheet = try? file.parseWorksheet(at: sheetPath) else {
                 print("Ошибка: невозможно прочитать лист '\(sheetPath)'.")
                 continue
@@ -239,33 +252,39 @@ struct ContentView: View {
 
             // Перебираем строки в листе
             for row in worksheet.data?.rows ?? [] {
+                // Вывод отладки строки
+                let rowValues = row.cells.compactMap { $0.stringValue(sharedStrings) }
+                print("Строка: \(rowValues)")
+
                 // Проверяем дату в первой ячейке строки
-                if let dateCell = row.cells.first?.stringValue(sharedStrings),
-                   dateCell == date {
+                if let dateCell = row.cells[safe: 0]?.stringValue(sharedStrings),
+                   let formattedDate = convertExcelDateToString(dateCell), // Преобразуем числовую дату
+                   formattedDate == date {
+                    
                     // Ищем значение валюты по индексу
+                    var columnIndex: Int?
+
                     switch currency {
-                    case "USD":
-                        if let cell = row.cells[safe: 1], let value = cell.stringValue(sharedStrings) {
-                            return Double(value)
-                        }
-                    case "EUR":
-                        if let cell = row.cells[safe: 2], let value = cell.stringValue(sharedStrings) {
-                            return Double(value)
-                        }
-                    case "RUB":
-                        if let cell = row.cells[safe: 3], let value = cell.stringValue(sharedStrings) {
-                            return Double(value)
-                        }
-                    case "KZT":
-                        if let cell = row.cells[safe: 4], let value = cell.stringValue(sharedStrings) {
-                            return Double(value)
-                        }
-                    case "CNY":
-                        if let cell = row.cells[safe: 5], let value = cell.stringValue(sharedStrings) {
-                            return Double(value)
-                        }
+                    case "USD": columnIndex = 1
+                    case "EUR": columnIndex = 2
+                    case "RUB": columnIndex = 3
+                    case "KZT": columnIndex = 4
+                    case "CNY": columnIndex = 5
                     default:
+                        print("Ошибка: неподдерживаемая валюта \(currency).")
                         return nil
+                    }
+
+                    // Получаем значение валюты
+                    if let columnIndex = columnIndex,
+                       let cell = row.cells[safe: columnIndex],
+                       let valueString = cell.stringValue(sharedStrings)?
+                            .replacingOccurrences(of: ",", with: "."),
+                       let value = Double(valueString) {
+                        print("Курс \(currency) на дату \(formattedDate): \(value)")
+                        return value
+                    } else {
+                        print("Ошибка: не удалось найти значение для валюты \(currency) на дату \(formattedDate).")
                     }
                 }
             }
@@ -275,6 +294,9 @@ struct ContentView: View {
         print("Данные не найдены: \(currency), \(date).")
         return nil
     }
+
+
+
 
 
     // Функция для получения деталей валюты (название и страна)
@@ -290,9 +312,9 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 5) {
+            VStack(spacing: 1) {
                 Text("Приложение для конвертации валют")
-                    .font(.largeTitle)
+                    .font(.title2 )
                     .fontWeight(.bold)
                     .multilineTextAlignment(.center)
                     .padding()
